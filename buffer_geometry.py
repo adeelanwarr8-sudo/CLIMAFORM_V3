@@ -15,7 +15,7 @@ from shapely.ops import transform
 
 BUFFER_MIN_M = 0
 BUFFER_MAX_M = 300
-BUFFER_DEFAULT_M = 100
+BUFFER_DEFAULT_M = 25
 BUFFER_STEP_M = 25
 
 
