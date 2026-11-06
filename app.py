@@ -15,6 +15,7 @@ from masterplan import CLASSES, PALETTE, parse_geojson, assign_class, clear_clas
 from shapely.geometry import shape
 from hashlib import sha256
 from climaforma_dxf import site_boundary_ui, dxf_placement_ui
+from eo_site import render_eo_site
 
 st.set_page_config(page_title="ClimaForma | Master Plan Intelligence", page_icon="◈", layout="wide", initial_sidebar_state="expanded")
 st.markdown("""<style>
@@ -44,13 +45,13 @@ with st.sidebar:
     st.divider()
     st.markdown("**PROJECT**")
     project_name = st.text_input("Project name", value="New climate-responsive master plan", label_visibility="collapsed", max_chars=90)
-    st.caption("Session-only prototype · No data is sent to an EO service")
+    st.caption("Session-only prototype · EO retrieval only on user request")
     st.divider()
     st.markdown("**WORKFLOW**")
     st.markdown("01 · Project & site  \n02 · Master plan classification  \n03 · Baseline assessment  \n04 · Design options  \n05 · Compare performance")
     st.divider()
     st.markdown("**SCIENTIFIC STATUS**")
-    st.caption("Geometry and manual classification are live. EO retrieval, thermal simulation, UHI and future NDVI prediction are not included in this UI prototype.")
+    st.caption("Site-specific observed Landsat LST and Sentinel-2 NDVI/NDBI are available on demand. Future design performance and UHI are not modelled.")
     st.divider()
     st.caption("The established ClimaForma v2 application remains separate and unchanged.")
 
@@ -83,6 +84,15 @@ site_tab, classify_tab, baseline_tab, options_tab, compare_tab = st.tabs([
 with site_tab:
     st.subheader("Start with your master plan · GeoJSON or DXF")
     st.caption("Choose GeoJSON (WGS84) or DXF (CAD geometry with an explicitly verified position). All design classes are assigned manually after import.")
+    st.markdown("#### Site boundary & environmental context")
+    st.caption("Define the geographical study boundary independently of any master-plan drawing. This same site boundary supports Landsat and Sentinel-2 processing for both GeoJSON and DXF projects.")
+    with st.expander("Define / review geographical site boundary", expanded=st.session_state.get("site_geojson") is None):
+        site = site_boundary_ui()
+    if site is None:
+        site = st.session_state.get("site_geojson")
+    render_eo_site(site)
+    st.divider()
+    st.markdown("#### Master plan import")
     input_format = st.radio("Master plan input", ["GeoJSON", "DXF"], horizontal=True, key="master_plan_input_format")
     left, right = st.columns([1, 1], gap="large")
     if input_format == "GeoJSON":
@@ -111,7 +121,6 @@ with site_tab:
         with left:
             st.markdown("**Step 1 · Define project site**")
             st.caption("Use a separately verified project-boundary polygon. DXF drawings often use local CAD coordinates.")
-        site = site_boundary_ui()
         current_site_key = json.dumps(site, sort_keys=True) if site is not None else None
         if st.session_state.get("v3_import_site_key") != current_site_key:
             if st.session_state.get("plan_source_type") == "DXF":
@@ -263,7 +272,7 @@ with baseline_tab:
         st.dataframe(pd.DataFrame(rows),use_container_width=True,hide_index=True)
         st.caption("Area totals are sums by class, not mutually exclusive site coverages. Overlapping features and missing site boundaries require validation before site percentages can be reported.")
         st.markdown("#### Environmental context and microclimate")
-        st.info("The EO and modelling engines are intentionally not connected in this UI preview. Future phases will restore observed Landsat LST and Sentinel-2 NDVI/NDBI as site context, then assess plan performance using a documented, validated method. No invented UHI or future NDVI values are displayed.")
+        st.info("Observed Landsat LST and Sentinel-2 NDVI/NDBI are available in Project & Site for the geographical boundary. These are observations of the current physical site, not simulations of the uploaded master plan. Predictive microclimate modelling and UHI assessment remain future work.")
 
 with options_tab:
     st.subheader("Design options")
@@ -280,4 +289,4 @@ with compare_tab:
     st.info("No alternative plans or microclimate simulations exist in the UI prototype yet. This panel will not fabricate values.")
 
 st.divider()
-st.caption("ClimaForma v3.0 DXF + GeoJSON prototype • Manual classification only • No automated land-cover labels, future NDVI, UHI, LST, or cooling predictions")
+st.caption("ClimaForma v3.0 · DXF / GeoJSON · Manually classified master plans · Observed site LST, NDVI, NDBI on demand · No predicted cooling, future NDVI, or UHI")
