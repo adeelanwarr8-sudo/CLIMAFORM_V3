@@ -13,6 +13,8 @@ import streamlit as st
 from streamlit_folium import st_folium
 from masterplan import CLASSES, PALETTE, parse_geojson, assign_class, clear_class, inventory, export_geojson
 from shapely.geometry import shape
+from hashlib import sha256
+from climaforma_dxf import site_boundary_ui, dxf_placement_ui
 
 st.set_page_config(page_title="ClimaForma | Master Plan Intelligence", page_icon="◈", layout="wide", initial_sidebar_state="expanded")
 st.markdown("""<style>
@@ -42,7 +44,7 @@ with st.sidebar:
     st.divider()
     st.markdown("**PROJECT**")
     project_name = st.text_input("Project name", value="New climate-responsive master plan", label_visibility="collapsed", max_chars=90)
-    st.caption("Private session prototype · No upload is sent to an EO service")
+    st.caption("Session-only prototype · No data is sent to an EO service")
     st.divider()
     st.markdown("**WORKFLOW**")
     st.markdown("01 · Project & site  \n02 · Master plan classification  \n03 · Baseline assessment  \n04 · Design options  \n05 · Compare performance")
@@ -54,7 +56,7 @@ with st.sidebar:
 
 st.markdown('<div class="cf-kicker">Earth observation × architectural design</div>', unsafe_allow_html=True)
 st.markdown('<div class="cf-title">Evaluate the plan. Improve the climate.</div>', unsafe_allow_html=True)
-st.markdown('<div class="cf-intro">Upload a georeferenced master plan, identify each design element yourself, and prepare a transparent baseline for microclimatic comparison. No automatic land-cover classification.</div>', unsafe_allow_html=True)
+st.markdown('<div class="cf-intro">Upload a GeoJSON or DXF master plan, identify each design element yourself, and prepare a transparent baseline for microclimatic comparison. No automatic land-cover classification.</div>', unsafe_allow_html=True)
 st.write("")
 
 if "plan_features" not in st.session_state:
@@ -69,7 +71,7 @@ summary_strip = st.columns(4)
 for column, title, val, hint in zip(summary_strip,
     ("Imported geometries", "Manually classified", "Unclassified", "Classification progress"),
     (str(summary["features"]), str(summary["classified"]), str(summary["unclassified"]), f'{summary["completion_pct"]:.0f}%'),
-    ("GeoJSON features", "Explicit assignments", "Requires user review", "Features, not site coverage")):
+    ("GeoJSON / DXF features", "Explicit assignments", "Requires user review", "Features, not site coverage")):
     with column:
         st.markdown(f'<div class="cf-panel"><div class="cf-label">{title}</div><div class="cf-value">{val}</div><div class="cf-note">{hint}</div></div>', unsafe_allow_html=True)
 
@@ -79,35 +81,84 @@ site_tab, classify_tab, baseline_tab, options_tab, compare_tab = st.tabs([
 ])
 
 with site_tab:
-    st.subheader("Start with your master plan")
-    st.caption("The master-plan GeoJSON—not automatically retrieved OSM buildings—is the basis for design classification. EPSG:4326 / CRS84 longitude–latitude coordinates are required.")
+    st.subheader("Start with your master plan · GeoJSON or DXF")
+    st.caption("Choose GeoJSON (WGS84) or DXF (CAD geometry with an explicitly verified position). All design classes are assigned manually after import.")
+    input_format = st.radio("Master plan input", ["GeoJSON", "DXF"], horizontal=True, key="master_plan_input_format")
     left, right = st.columns([1, 1], gap="large")
-    with left:
-        upload = st.file_uploader("Upload master-plan GeoJSON", type=["geojson", "json"], key="masterplan_file", help="Up to 5 MB and 2,000 individual features. Point, line and polygon geometries are supported.")
-        if upload is not None:
-            if st.button("Import this master plan", type="primary", use_container_width=True):
+    if input_format == "GeoJSON":
+        with left:
+            upload = st.file_uploader("Upload master-plan GeoJSON", type=["geojson", "json"],
+                                      key="masterplan_file", help="Up to 5 MB and 2,000 features; WGS84 longitude/latitude.")
+            if upload is not None and st.button("Import this GeoJSON", type="primary", use_container_width=True):
                 try:
                     features, digest = parse_geojson(upload.getvalue())
                     st.session_state.plan_features = features
                     st.session_state.plan_sha = digest
+                    st.session_state.plan_source_type = "GeoJSON"
                     st.session_state.selected_feature = features[0]["id"]
                     st.session_state.pop("feature_selector", None)
-                    st.success(f"Imported {len(features)} features. All are unclassified.")
                     st.rerun()
                 except ValueError as err:
                     st.error(str(err))
-        if st.session_state.plan_features:
-            st.success(f"Master plan loaded · {len(st.session_state.plan_features)} features")
-            st.caption("Re-importing replaces this session's classifications. Export the classified plan first if you want to retain them.")
-        else:
-            st.info("Upload a master plan to activate feature classification. No geometry receives an inferred class.")
-    with right:
-        st.markdown("**Expected input**")
-        st.markdown("A GeoJSON `FeatureCollection` with individual polygons, points or lines representing master-plan elements. Existing class-like properties, if present, are retained as source metadata but **are not adopted as manual classifications**.")
-        st.markdown("**Site boundary**")
-        st.caption("This UI preview uses the geographic extent of uploaded features only for map navigation. It does not assume that their bounding rectangle is a valid cadastral or project boundary. An independently verified site polygon will be a separate input in the next implementation stage.")
-        st.markdown("**Next**")
-        st.caption("Select the Classify Master Plan tab, click a shape on the map or use the feature selector, and assign its semantic category.")
+        with right:
+            st.markdown("**GeoJSON import**")
+            st.caption("Upload a WGS84 FeatureCollection of individual plan elements. "
+                       "Existing source properties are preserved for inspection but never interpreted as classifications.")
+            st.caption("Each feature begins unclassified, even if its source layer has a descriptive name.")
+    else:
+        st.info("DXF geometry is imported without semantic interpretation. Confirm site, drawing units, "
+                "coordinate placement and alignment before creating the classification inventory.")
+        with left:
+            st.markdown("**Step 1 · Define project site**")
+            st.caption("Use a separately verified project-boundary polygon. DXF drawings often use local CAD coordinates.")
+        site = site_boundary_ui()
+        current_site_key = json.dumps(site, sort_keys=True) if site is not None else None
+        if st.session_state.get("v3_import_site_key") != current_site_key:
+            if st.session_state.get("plan_source_type") == "DXF":
+                st.session_state.plan_features = []
+                st.session_state.plan_sha = None
+                st.session_state.selected_feature = None
+                st.session_state.pop("feature_selector", None)
+            st.session_state["v3_import_site_key"] = current_site_key
+        if site is not None:
+            st.markdown("**Step 2 · Place DXF master plan**")
+            placement = dxf_placement_ui(site, key="v3_dxf")
+            if placement is not None:
+                st.success(f"Placement accepted · {len(placement.feature_collection['features']):,} CAD-derived geometries")
+                st.caption("CAD layers and blocks remain source metadata. The original file is not altered. "
+                           "Only currently selected visible layers will be imported.")
+                include_boundary = st.checkbox("Include the CAD site-boundary layer as a classifiable feature",
+                                               value=False, key="v3_include_site_outline")
+                chosen_layers = set(st.session_state.get("v3_dxf_layers", []))
+                boundary_layer = st.session_state.get("v3_dxf_boundary_layer")
+                selected_features = [f for f in placement.feature_collection["features"]
+                                     if f["properties"].get("layer") in chosen_layers and
+                                     (include_boundary or f["properties"].get("layer") != boundary_layer)]
+                st.caption(f"{len(selected_features):,} features from selected CAD layers will enter manual classification. "
+                           "Unselected layers and the optional site-outline layer are excluded.")
+                if st.button("Import accepted DXF for manual classification", type="primary", key="import_placed_dxf",
+                             disabled=not selected_features):
+                    try:
+                        raw = json.dumps({"type": "FeatureCollection", "features": selected_features}).encode("utf-8")
+                        features, digest = parse_geojson(raw)
+                        st.session_state.plan_features = features
+                        st.session_state.plan_sha = digest
+                        st.session_state.plan_source_type = "DXF"
+                        st.session_state.selected_feature = features[0]["id"]
+                        st.session_state.pop("feature_selector", None)
+                        st.rerun()
+                    except ValueError as err:
+                        st.error("DXF geometry not accepted: " + str(err))
+                if len(placement.feature_collection["features"]) > 2000:
+                    st.warning("This DXF has over 2,000 features. Export only relevant layers or simplify it "
+                               "in CAD before using the classification prototype.")
+    if st.session_state.plan_features:
+        st.success(f"Master plan imported from {st.session_state.get('plan_source_type', 'file')} · "
+                   f"{len(st.session_state.plan_features):,} features")
+        st.caption("All features require explicit classification. Re-importing replaces session assignments; "
+                   "export the classified master plan first.")
+    else:
+        st.info("Import a master plan to activate individual feature classification.")
 
 with classify_tab:
     st.subheader("You classify. ClimaForma measures.")
@@ -164,6 +215,8 @@ with classify_tab:
                 st.rerun()
             f = next(f for f in features if f["id"] == chosen_id)
             st.caption(f"Geometry: {f['geometry_type']} | Source feature ID: {f['source_id'] or 'not provided'}")
+            if f["properties"].get("layer") is not None:
+                st.caption(f"CAD source layer: {f['properties']['layer']} · CAD entity: {f['properties'].get('kind', 'unknown')}")
             if f["area_m2"] is not None:
                 st.metric("Geometry area",f"{f['area_m2']:,.1f} m²")
             elif f["length_m"] is not None:
@@ -227,4 +280,4 @@ with compare_tab:
     st.info("No alternative plans or microclimate simulations exist in the UI prototype yet. This panel will not fabricate values.")
 
 st.divider()
-st.caption("ClimaForma v3.0 UI prototype • Manual classification only • No automated land-cover labels, future NDVI, UHI, LST, or cooling predictions")
+st.caption("ClimaForma v3.0 DXF + GeoJSON prototype • Manual classification only • No automated land-cover labels, future NDVI, UHI, LST, or cooling predictions")
