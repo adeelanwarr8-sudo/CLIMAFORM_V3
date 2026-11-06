@@ -162,7 +162,7 @@ def render_eo_site(boundary: dict | None) -> None:
     with site_col:
         _site_info_panel(boundary, buffer_m)
     st.caption("Toggle observed LST, NDVI and NDBI independently using the map layer selector. These observations describe the physical site at their acquisition dates, not a proposed master plan.")
-    with st.expander("Acquire observations & inspect quality", expanded=(lst is None and indices is None)):
+    with st.expander("Satellite data acquisition", expanded=(lst is None and indices is None)):
         land, optic = st.columns(2)
         with land:
             st.markdown("**Landsat 8/9 · Surface temperature**")
@@ -180,7 +180,6 @@ def render_eo_site(boundary: dict | None) -> None:
                     st.warning("No qualifying Landsat surface-temperature scene within the permitted 3–45-day window.")
                 else:
                     scene = found.candidate
-                    st.caption(f"{scene.item_id} · {scene.observed_utc[:10]} · {scene.scene_cloud_pct:.1f}% scene cloud")
                     if st.button("Process observed LST & QA",key="cf_eo_lst_process",use_container_width=True):
                         try:
                             with st.spinner("Reading thermal / QA rasters…"):
@@ -192,8 +191,8 @@ def render_eo_site(boundary: dict | None) -> None:
                             st.error(str(exc))
                 result = st.session_state.get("cf_eo_lst")
                 if result is not None:
-                    st.caption(f"Site QA: {result.status} · {result.valid_site_pixels}/{result.site_pixels} valid delivery pixels · {result.site_coverage_pct:.1f}% coverage")
-                    for note in result.notes: st.caption(note)
+                    if result.status != "SITE_QA_PASS":
+                        st.warning("Landsat data did not meet the site-quality requirements. The LST indicator is unavailable.")
         with optic:
             st.markdown("**Sentinel-2 · NDVI / NDBI**")
             if st.button("Discover Sentinel-2 scene",key="cf_eo_sentinel_find",use_container_width=True):
@@ -210,7 +209,6 @@ def render_eo_site(boundary: dict | None) -> None:
                     st.warning("No qualifying Sentinel-2 scene within the permitted 90/180-day search windows.")
                 else:
                     scene = found.candidate
-                    st.caption(f"{scene.item_id} · {scene.observed_utc[:10]} · {scene.scene_cloud_pct:.1f}% scene cloud")
                     if st.button("Process NDVI / NDBI & QA",key="cf_eo_indices_process",use_container_width=True):
                         try:
                             with st.spinner("Reading optical bands and SCL mask…"):
@@ -222,6 +220,5 @@ def render_eo_site(boundary: dict | None) -> None:
                             st.error(str(exc))
                 result=st.session_state.get("cf_eo_indices")
                 if result is not None:
-                    st.caption(f"Site QA: {result.status} · {result.valid_pixels}/{result.footprint_pixels} valid 20 m pixels · {result.valid_coverage_pct}% coverage")
-                    for note in result.notes: st.caption(note)
-    st.caption("LST: 30 m delivery grid, approximately 100 m native thermal information. NDVI/NDBI: 20 m grid. Single-scene observations; separate dates and cloud masks. No UHI intensity, air temperature or future design cooling prediction is calculated.")
+                    if result.status != "PRELIMINARY_QA_PASS":
+                        st.warning("Sentinel-2 data did not meet the site-quality requirements. NDVI and NDBI are unavailable.")
