@@ -182,7 +182,13 @@ with classify_tab:
             full_bounds = [min(g.bounds[0] for g in shapes), min(g.bounds[1] for g in shapes),
                            max(g.bounds[2] for g in shapes), max(g.bounds[3] for g in shapes)]
             center = [(full_bounds[1]+full_bounds[3])/2, (full_bounds[0]+full_bounds[2])/2]
-            m = folium.Map(location=center, zoom_start=17, tiles="CartoDB positron", control_scale=True)
+            m = folium.Map(location=center, zoom_start=17, tiles=None, control_scale=True)
+            folium.TileLayer(tiles="OpenStreetMap", name="Street map", show=True).add_to(m)
+            folium.TileLayer(
+                tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+                name="Aerial imagery", attr="Tiles © Esri and contributors", show=False,
+            ).add_to(m)
+            folium.LayerControl(collapsed=True).add_to(m)
             for f in features:
                 color = PALETTE[f["class"]]
                 selected = f["id"] == st.session_state.selected_feature

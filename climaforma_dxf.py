@@ -476,10 +476,10 @@ DEFAULT_CENTER = (41.3874, 2.1686)          # Barcelona
 def _base_map(lat: float, lon: float, zoom: int) -> folium.Map:
     m = folium.Map(location=[lat, lon], zoom_start=zoom, tiles=None, max_zoom=22,
                    control_scale=True)
-    folium.TileLayer(ESRI_IMAGERY, name="Aerial imagery", attr="Tiles © Esri and contributors",
-                     max_zoom=22, max_native_zoom=19).add_to(m)
-    folium.TileLayer("OpenStreetMap", name="Street map", max_zoom=22,
+    folium.TileLayer("OpenStreetMap", name="Street map", show=True, max_zoom=22,
                      max_native_zoom=19).add_to(m)
+    folium.TileLayer(ESRI_IMAGERY, name="Aerial imagery", attr="Tiles © Esri and contributors",
+                     show=False, max_zoom=22, max_native_zoom=19).add_to(m)
     return m
 
 

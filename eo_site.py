@@ -50,8 +50,12 @@ def _image_overlay(m, png, bounds, label, *, show=False):
 def build_context_map(boundary, lst=None, indices=None) -> folium.Map:
     geom = shape(boundary)
     centre = geom.centroid
-    m = folium.Map(location=[centre.y, centre.x], zoom_start=16, tiles="CartoDB positron", control_scale=True)
-    folium.TileLayer("OpenStreetMap", name="Street map", show=False).add_to(m)
+    m = folium.Map(location=[centre.y, centre.x], zoom_start=16, tiles=None, control_scale=True)
+    folium.TileLayer(tiles="OpenStreetMap", name="Street map", show=True).add_to(m)
+    folium.TileLayer(
+        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+        name="Aerial imagery", attr="Tiles © Esri and contributors", show=False,
+    ).add_to(m)
     folium.GeoJson(boundary, name="Geographical site boundary",
                    style_function=lambda _: {"color":"#08786d", "weight":3, "fillOpacity":0.07}).add_to(m)
     if lst is not None and lst.status == "SITE_QA_PASS":
