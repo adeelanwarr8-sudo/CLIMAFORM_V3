@@ -467,6 +467,7 @@ import folium
 import streamlit as st
 from folium.plugins import Draw
 from streamlit_folium import st_folium
+from address_lookup import search_addresses
 
 ESRI_IMAGERY = ("https://server.arcgisonline.com/ArcGIS/rest/services/"
                 "World_Imagery/MapServer/tile/{z}/{y}/{x}")
@@ -494,29 +495,68 @@ def _geometry_from_geojson(data: dict) -> dict:
 
 
 def site_boundary_ui() -> dict | None:
-    """Step 1 (standalone only): draw or upload the site boundary."""
+    """Draw/upload site boundary after optional address navigation (OSM Nominatim).
+
+    The searched address is a map-navigation point, NOT an official parcel
+    boundary. No geocoding occurs without an explicit Search button click.
+    """
     site = st.session_state.get("site_geojson")
     if site is not None:
-        st.sidebar.success("Site boundary defined.")
-        if st.sidebar.button("Redraw site boundary", use_container_width=True):
-            for k in list(st.session_state):
-                if k.startswith("dxf_") or k == "site_geojson":
-                    st.session_state.pop(k, None)
+        st.success("Geographical site boundary defined.")
+        if st.button("Clear / redefine site boundary", key="clear_site_boundary"):
+            st.session_state.pop("site_geojson", None)
+            # Prevent a previously accepted DXF placement being reused for a new site.
+            for name in list(st.session_state):
+                if name.startswith("v3_dxf_") or name.startswith("dxf_"):
+                    st.session_state.pop(name, None)
             st.rerun()
         return site
 
-    st.subheader("1 · Define the site boundary")
-    st.caption("Draw one polygon or rectangle around the site on the aerial image, "
-               "or upload a GeoJSON polygon in the sidebar.")
-    up = st.sidebar.file_uploader("Site boundary GeoJSON (optional)", type=["geojson", "json"])
+    st.markdown("**Find your project location**")
+    st.caption("Search an address or place to navigate the map, then draw the exact site boundary yourself. Address search uses OpenStreetMap Nominatim without an API key.")
+    address = st.text_input("Address or place", key="cf_address_query", max_chars=180,
+                            placeholder="Street address, city, country")
+    if st.button("Search address", key="cf_address_search"):
+        try:
+            matches = search_addresses(address)
+            st.session_state["cf_address_matches"] = matches
+            st.session_state["cf_address_match_query"] = address.strip()
+            if not matches:
+                st.warning("No matching address found. Try a more specific location.")
+        except ValueError as exc:
+            st.warning(str(exc))
+            st.session_state["cf_address_matches"] = []
+            st.session_state["cf_address_match_query"] = None
+    matches = (st.session_state.get("cf_address_matches", [])
+               if st.session_state.get("cf_address_match_query") == address.strip() else [])
+    if matches:
+        chosen = st.selectbox("Matching locations", range(len(matches)),
+                              format_func=lambda i: matches[i]["label"], key="cf_address_match_index")
+        if st.button("Go to selected location", key="cf_address_go", type="primary"):
+            st.session_state["cf_address_location"] = dict(matches[chosen])
+            st.session_state["cf_address_map_revision"] = st.session_state.get("cf_address_map_revision", 0) + 1
+            st.rerun()
+    st.caption("Search only on request · © OpenStreetMap contributors · A search result is not a property boundary.")
+
+    loc = st.session_state.get("cf_address_location")
+    if loc:
+        st.info(f"Map location: {loc['label']}. Draw the site boundary around your project area.")
+    st.markdown("**Define geographical site boundary**")
+    up = st.file_uploader("Upload site-boundary GeoJSON (optional)", type=["geojson", "json"],
+                          key="cf_boundary_upload")
     if up is not None:
         try:
             st.session_state["site_geojson"] = _geometry_from_geojson(_json.loads(up.getvalue()))
             st.rerun()
         except (ValueError, KeyError, IndexError, _json.JSONDecodeError) as exc:
-            st.sidebar.error(f"Could not use this GeoJSON: {exc}")
+            st.error(f"Invalid boundary GeoJSON: {exc}")
 
-    m = _base_map(*DEFAULT_CENTER, 15)
+    if loc:
+        m = _base_map(loc["lat"], loc["lon"], 17)
+        folium.Marker([loc["lat"], loc["lon"]], tooltip="Address search result (not boundary)",
+                      icon=folium.Icon(color="blue", icon="info-sign")).add_to(m)
+    else:
+        m = _base_map(*DEFAULT_CENTER, 15)
     Draw(export=False, position="topleft",
          draw_options={"polyline": False, "circle": False, "circlemarker": False,
                        "marker": False, "polygon": {"allowIntersection": False},
@@ -525,14 +565,15 @@ def site_boundary_ui() -> dict | None:
                                                         "dashArray": "6, 6"}},
                        "remove": True}).add_to(m)
     folium.LayerControl(collapsed=True).add_to(m)
-    out = st_folium(m, key="site_draw_map", height=560, use_container_width=True,
+    map_key = f"site_draw_map_{st.session_state.get('cf_address_map_revision', 0)}"
+    out = st_folium(m, key=map_key, height=560, use_container_width=True,
                     returned_objects=["all_drawings"])
     drawings = (out or {}).get("all_drawings") or []
     polys = [d["geometry"] for d in drawings
              if d.get("geometry", {}).get("type") == "Polygon"]
     if len(polys) > 1:
-        st.warning("Draw only one site boundary; delete the extra shapes.")
-    elif polys and st.button("Use this site boundary", type="primary"):
+        st.warning("Draw only one site boundary; delete extra shapes.")
+    elif polys and st.button("Use this site boundary", type="primary", key="cf_accept_boundary"):
         st.session_state["site_geojson"] = polys[0]
         st.rerun()
     return None
