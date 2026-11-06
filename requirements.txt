@@ -1,0 +1,6 @@
+streamlit>=1.38,<2
+streamlit-folium>=0.23,<1
+folium>=0.17,<1
+shapely>=2.0,<3
+pyproj>=3.5,<4
+pandas>=2.0,<4
